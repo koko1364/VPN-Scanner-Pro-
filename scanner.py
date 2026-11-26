@@ -77,7 +77,17 @@ for item in good:
     host=item[1][0].lower()
     if host in endpoints: overflow.append(item)
     else: endpoints.add(host); unique.append(item)
-good=unique+overflow
+# Round-robin across source groups, keeping distinct hostnames first.
+groups={}
+for item in unique:
+    origins=evidence.get(item[0].split('#')[0],set())
+    source=min(origins) if origins else -1
+    groups.setdefault(source,[]).append(item)
+good=[]
+while any(groups.values()):
+    for group in groups.values():
+        if group: good.append(group.pop(0))
+good+=overflow
 def tunnel(item):
     import tempfile, subprocess, time, os
     link,(host,port,scheme,q),delay=item
@@ -116,7 +126,13 @@ def tunnel(item):
                     out=subprocess.check_output(['curl','--silent','--show-error','--fail','--max-time','8','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code} %{time_starttransfer}',url],stderr=subprocess.DEVNULL,text=True).split()
                     if out[0] not in ('200','204'): return
                     results.append(float(out[1]))
-                return item,max(results),max(results)-min(results)
+                rates=[]
+                for attempt in range(2):
+                    out=subprocess.check_output(['curl','--silent','--show-error','--fail','--max-time','15','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code} %{size_download} %{speed_download}','https://speed.cloudflare.com/__down?bytes=524288'],stderr=subprocess.DEVNULL,text=True).split()
+                    if out[0]!='200' or float(out[1])<524288 or float(out[2])<125000: return
+                    rates.append(float(out[2]))
+                    if not attempt: time.sleep(10)
+                return item,max(results),max(results)-min(results),min(rates)
             finally:
                 proc.terminate()
                 try: proc.wait(timeout=2)
@@ -137,7 +153,7 @@ for item in good[:48]:
     history[k]=(old+[int(k in passed)])[-8:]
 def stability(x):
     h=history[key(x[0])]
-    return (-(sum(h)+1)/(len(h)+2),-sum(h),x[2],x[1],rank(x[0]))
+    return (-(sum(h)+1)/(len(h)+2),-sum(h),-x[3],x[2],x[1],rank(x[0]))
 tested.sort(key=stability)
 history_path.write_text(json.dumps({k:v for k,v in history.items() if k in {key(i) for i in good[:48]}}))
 good=[]
