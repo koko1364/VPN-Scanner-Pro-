@@ -71,6 +71,13 @@ def rank(x):
     priority=0 if 0 in origins else 1 if {1,2} <= origins else 2 if origins & {1,2} else 3
     return (priority,0 if scheme=='vless' and q.get('security')==['reality'] and q.get('type',['tcp'])[0] in ('tcp','raw') else 1 if scheme=='trojan' else 2,delay,port!=443)
 good.sort(key=rank)
+# Interleave distinct endpoints before expensive tests.
+unique=[]; overflow=[]; endpoints=set()
+for item in good:
+    host=item[1][0].lower()
+    if host in endpoints: overflow.append(item)
+    else: endpoints.add(host); unique.append(item)
+good=unique+overflow
 def tunnel(item):
     import tempfile, subprocess, time, os
     link,(host,port,scheme,q),delay=item
@@ -133,7 +140,12 @@ def stability(x):
     return (-(sum(h)+1)/(len(h)+2),-sum(h),x[2],x[1],rank(x[0]))
 tested.sort(key=stability)
 history_path.write_text(json.dumps({k:v for k,v in history.items() if k in {key(i) for i in good[:48]}}))
-good=[x[0] for x in tested]
+good=[]
+hosts=set()
+for x in tested:
+    item=x[0]; host=item[1][0].lower()
+    if host in hosts: continue
+    hosts.add(host); good.append(item)
 print("HTTPS tunnel passes outside Iran:",len(good))
 for name,rows in [('v2box',good),('tizy',[x for x in good if x[1][2] in ('vless','vmess','trojan','ss') and x[1][3].get('type',['tcp'])[0] in ('tcp','raw','ws','grpc')])]:
     p=Path(name+'.txt')
