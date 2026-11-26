@@ -103,8 +103,8 @@ def tunnel(item):
             try:
                 time.sleep(.6)
                 results=[]
-                for attempt in range(4):
-                    if attempt: time.sleep(5)
+                for attempt in range(7):
+                    if attempt: time.sleep(15)
                     url=('https://www.gstatic.com/generate_204','https://www.cloudflare.com/cdn-cgi/trace')[attempt%2]
                     out=subprocess.check_output(['curl','--silent','--show-error','--fail','--max-time','8','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code} %{time_starttransfer}',url],stderr=subprocess.DEVNULL,text=True).split()
                     if out[0] not in ('200','204'): return
@@ -116,8 +116,8 @@ def tunnel(item):
                 except subprocess.TimeoutExpired: proc.kill(); proc.wait()
     except Exception: return
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-    tested=[x for x in ex.map(tunnel,good[:48]) if x]
+with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
+    tested=[x for x in ex.map(tunnel,good[:24]) if x]
 import hashlib
 history_path=Path('stability.json')
 try: history=json.loads(history_path.read_text())
