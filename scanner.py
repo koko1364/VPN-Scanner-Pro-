@@ -71,12 +71,60 @@ def rank(x):
     priority=0 if 0 in origins else 1 if {1,2} <= origins else 2 if origins & {1,2} else 3
     return (priority,0 if scheme=='vless' and q.get('security')==['reality'] and q.get('type',['tcp'])[0] in ('tcp','raw') else 1 if scheme=='trojan' else 2,delay,port!=443)
 good.sort(key=rank)
+def tunnel(item):
+    import tempfile, subprocess, time, os
+    link,(host,port,scheme,q),delay=item
+    def v(k,default=''): return q.get(k,[default])[0]
+    try:
+        u=urlsplit(link)
+        if scheme not in ('vless','trojan'): return
+        transport=v('type','tcp')
+        if transport not in ('tcp','raw','ws','grpc'): return
+        security=v('security')
+        if security not in ('tls','reality'): return
+        stream={'network':transport,'security':security}
+        if security=='reality':
+            stream['realitySettings']={'serverName':v('sni'),'fingerprint':v('fp','chrome'),'publicKey':v('pbk'),'shortId':v('sid'),'spiderX':v('spx')}
+        else:
+            stream['tlsSettings']={'serverName':v('sni',host),'allowInsecure':False,'fingerprint':v('fp','chrome')}
+            if v('alpn'): stream['tlsSettings']['alpn']=v('alpn').split(',')
+        if transport=='ws': stream['wsSettings']={'path':v('path','/'),'headers':{'Host':v('host',host)}}
+        if transport=='grpc': stream['grpcSettings']={'serviceName':v('serviceName')}
+        from urllib.parse import unquote
+        user={'id':unquote(u.username),'encryption':v('encryption','none')}
+        if v('flow'): user['flow']=v('flow')
+        settings={'vnext':[{'address':host,'port':port,'users':[user]}]} if scheme=='vless' else {'servers':[{'address':host,'port':port,'password':unquote(u.username)}]}
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1',0)); local=sock.getsockname()[1]
+        cfg={'log':{'loglevel':'error'},'inbounds':[{'listen':'127.0.0.1','port':local,'protocol':'socks','settings':{'auth':'noauth','udp':False}}],'outbounds':[{'protocol':scheme,'settings':settings,'streamSettings':stream}]}
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/'config.json'; p.write_text(json.dumps(cfg))
+            proc=subprocess.Popen(['xray','run','-c',str(p)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            try:
+                time.sleep(.6)
+                results=[]
+                for url in ('https://www.gstatic.com/generate_204','https://www.cloudflare.com/cdn-cgi/trace'):
+                    out=subprocess.check_output(['curl','--silent','--show-error','--fail','--max-time','8','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code} %{time_starttransfer}',url],stderr=subprocess.DEVNULL,text=True).split()
+                    if out[0] not in ('200','204'): return
+                    results.append(float(out[1]))
+                return item,max(results)
+            finally:
+                proc.terminate()
+                try: proc.wait(timeout=2)
+                except subprocess.TimeoutExpired: proc.kill(); proc.wait()
+    except Exception: return
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+    tested=[x for x in ex.map(tunnel,good[:100]) if x]
+tested.sort(key=lambda x:(x[1],rank(x[0])))
+good=[x[0] for x in tested]
+print("HTTPS tunnel passes outside Iran:",len(good))
 for name,rows in [('v2box',good),('tizy',[x for x in good if x[1][2] in ('vless','vmess','trojan','ss') and x[1][3].get('type',['tcp'])[0] in ('tcp','raw','ws','grpc')])]:
     p=Path(name+'.txt')
     if rows:
-        p.write_text('\n'.join(x[0] for x in rows[:30])+'\n')
+        p.write_text('\n'.join(x[0] for x in rows[:15])+'\n')
     elif not p.exists():
         p.write_text('')
     else:
         print('No candidates; retaining previous file:',name)
-print('TCP reachable candidates only; no VPN tunnel or Iran test:',len(good))
+print('HTTPS tested outside Iran; no Iran test:',len(good))
