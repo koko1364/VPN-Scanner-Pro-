@@ -103,11 +103,13 @@ def tunnel(item):
             try:
                 time.sleep(.6)
                 results=[]
-                for url in ('https://www.gstatic.com/generate_204','https://www.cloudflare.com/cdn-cgi/trace'):
+                for attempt in range(4):
+                    if attempt: time.sleep(5)
+                    url=('https://www.gstatic.com/generate_204','https://www.cloudflare.com/cdn-cgi/trace')[attempt%2]
                     out=subprocess.check_output(['curl','--silent','--show-error','--fail','--max-time','8','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code} %{time_starttransfer}',url],stderr=subprocess.DEVNULL,text=True).split()
                     if out[0] not in ('200','204'): return
                     results.append(float(out[1]))
-                return item,max(results)
+                return item,max(results),max(results)-min(results)
             finally:
                 proc.terminate()
                 try: proc.wait(timeout=2)
@@ -115,16 +117,29 @@ def tunnel(item):
     except Exception: return
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-    tested=[x for x in ex.map(tunnel,good[:100]) if x]
-tested.sort(key=lambda x:(x[1],rank(x[0])))
+    tested=[x for x in ex.map(tunnel,good[:48]) if x]
+import hashlib
+history_path=Path('stability.json')
+try: history=json.loads(history_path.read_text())
+except Exception: history={}
+def key(item): return hashlib.sha256(item[0].split('#')[0].encode()).hexdigest()
+passed={key(x[0]) for x in tested}
+for item in good[:48]:
+    k=key(item)
+    old=history.get(k,[])
+    history[k]=(old+[int(k in passed)])[-8:]
+def stability(x):
+    h=history[key(x[0])]
+    return (-(sum(h)+1)/(len(h)+2),-sum(h),x[2],x[1],rank(x[0]))
+tested.sort(key=stability)
+history_path.write_text(json.dumps({k:v for k,v in history.items() if k in {key(i) for i in good[:48]}}))
 good=[x[0] for x in tested]
 print("HTTPS tunnel passes outside Iran:",len(good))
 for name,rows in [('v2box',good),('tizy',[x for x in good if x[1][2] in ('vless','vmess','trojan','ss') and x[1][3].get('type',['tcp'])[0] in ('tcp','raw','ws','grpc')])]:
     p=Path(name+'.txt')
     if rows:
-        p.write_text('\n'.join(x[0] for x in rows[:15])+'\n')
-    elif not p.exists():
-        p.write_text('')
+        p.write_text('\n'.join(x[0] for x in rows[:10])+'\n')
     else:
-        print('No candidates; retaining previous file:',name)
+        p.write_text('')
+        print('No passing candidates:',name)
 print('HTTPS tested outside Iran; no Iran test:',len(good))
