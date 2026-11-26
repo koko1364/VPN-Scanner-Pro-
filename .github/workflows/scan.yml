@@ -18,6 +18,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Install Xray
+        run: |
+          curl -fLsS --retry 3 https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o /tmp/xray.zip
+          unzip -o /tmp/xray.zip xray -d /tmp/xray-bin
+          sudo install -m 755 /tmp/xray-bin/xray /usr/local/bin/xray
+          xray version
       - run: python3 scanner.py
       - run: |
           git config user.name "github-actions[bot]"
