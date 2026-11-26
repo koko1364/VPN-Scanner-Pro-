@@ -2,6 +2,13 @@ import urllib.request, base64, json, re, concurrent.futures, socket
 from urllib.parse import urlsplit, parse_qs
 from pathlib import Path
 SOURCES = [
+"https://raw.githubusercontent.com/A-K-6/v2ray_scrapper_repo/main/instagram_respina.txt",
+"https://raw.githubusercontent.com/A-K-6/v2ray_scrapper_repo/main/youtube_respina.txt",
+"https://raw.githubusercontent.com/A-K-6/v2ray_scrapper_repo/main/subscription.txt",
+"https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/top100.txt",
+"https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs_base64.txt",
+"https://molido-sub.hidooch980.workers.dev/ios",
+"https://raw.githubusercontent.com/hidooch980/vpn-sub/sub/fastest.txt",
 "https://raw.githubusercontent.com/CNT-Cafe/Public-Configs/main/%E2%9C%A7%20Public%20Configs",
 "https://raw.githubusercontent.com/Bllare/V2ray-Configs/main/MCI",
 "https://raw.githubusercontent.com/Bllare/V2ray-Configs/main/Irancell",
@@ -57,8 +64,8 @@ for idx,batch in enumerate(batches):
     for link in batch:
         evidence.setdefault(link.split("#")[0],set()).add(idx)
 seen=set(); items=[]
-for batch in batches:
-    for s in batch:
+for batch in __import__("itertools").zip_longest(*batches):
+    for s in filter(None,batch):
         key=s.split('#')[0]
         if key in seen: continue
         seen.add(key); info=inspect(s)
@@ -68,7 +75,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
 def rank(x):
     s,(_,port,scheme,q),delay=x
     origins=evidence.get(s.split("#")[0],set())
-    priority=0 if 0 in origins else 1 if {1,2} <= origins else 2 if origins & {1,2} else 3
+    priority=0 if origins & {0,1,2,7} else 1 if origins & {8,9,5,6,12} else 2
     return (priority,0 if scheme=='vless' and q.get('security')==['reality'] and q.get('type',['tcp'])[0] in ('tcp','raw') else 1 if scheme=='trojan' else 2,delay,port!=443)
 good.sort(key=rank)
 # Interleave distinct endpoints before expensive tests.
@@ -126,6 +133,9 @@ def tunnel(item):
                     out=subprocess.check_output(['curl','--silent','--show-error','--fail','--max-time','8','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code} %{time_starttransfer}',url],stderr=subprocess.DEVNULL,text=True).split()
                     if out[0] not in ('200','204'): return
                     results.append(float(out[1]))
+                for target in ('https://www.instagram.com/','https://www.youtube.com/generate_204','https://telegram.org/'):
+                    out=subprocess.check_output(['curl','--silent','--show-error','--max-time','12','--max-filesize','2097152','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code}',target],stderr=subprocess.DEVNULL,text=True)
+                    if not out.startswith(('2','3')): return
                 rates=[]
                 for attempt in range(2):
                     out=subprocess.check_output(['curl','--silent','--show-error','--fail','--max-time','15','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code} %{size_download} %{speed_download}','https://speed.cloudflare.com/__down?bytes=524288'],stderr=subprocess.DEVNULL,text=True).split()
@@ -140,7 +150,7 @@ def tunnel(item):
     except Exception: return
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
-    tested=[x for x in ex.map(tunnel,good[:24]) if x]
+    tested=[x for x in ex.map(tunnel,good[:36]) if x]
 import hashlib
 history_path=Path('stability.json')
 try: history=json.loads(history_path.read_text())
@@ -150,7 +160,7 @@ passed={key(x[0]) for x in tested}
 for item in good[:48]:
     k=key(item)
     old=history.get(k,[])
-    history[k]=(old+[int(k in passed)])[-8:]
+    history[k]=(old+[int(k in passed)])[-24:]
 def stability(x):
     h=history[key(x[0])]
     return (-(sum(h)+1)/(len(h)+2),-sum(h),-x[3],x[2],x[1],rank(x[0]))
