@@ -28,10 +28,29 @@ jobs:
           sudo install -m 755 /tmp/xray-bin/xray /usr/local/bin/xray
           xray version
       - run: python3 scanner.py
+      - name: Generate TIZY alternate formats
+        run: |
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          from urllib.parse import urlsplit, parse_qs
+          raw = Path('tizy.txt').read_bytes()
+          Path('tizy-base64.txt').write_bytes(base64.b64encode(raw))
+          clean = []
+          for line in raw.decode().splitlines():
+              try:
+                  u = urlsplit(line)
+                  q = parse_qs(u.query)
+                  if u.scheme == 'vless' and q.get('security') == ['reality'] and q.get('type', ['tcp'])[0] in ('tcp', 'raw'):
+                      clean.append(line.split('#', 1)[0] + '#TIZY-' + str(len(clean)+1))
+              except ValueError:
+                  continue
+          Path('tizy-clean.txt').write_text('\n'.join(clean) + ('\n' if clean else ''), encoding='ascii')
+          PY
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add v2box.txt tizy.txt stability.json
+          git add v2box.txt tizy.txt tizy-base64.txt tizy-clean.txt stability.json
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "Refresh subscription candidates"
           for attempt in 1 2 3; do
