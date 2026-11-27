@@ -75,7 +75,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
 def rank(x):
     s,(_,port,scheme,q),delay=x
     origins=evidence.get(s.split("#")[0],set())
-    priority=0 if origins & {0,1,2,7} else 1 if origins & {8,9,5,6,12} else 2
+    priority=0 if 10 in origins else 1 if origins & {0,1,2,7} else 2 if origins & {8,9,5,6,12} else 3
     return (priority,0 if scheme=='vless' and q.get('security')==['reality'] and q.get('type',['tcp'])[0] in ('tcp','raw') else 1 if scheme=='trojan' else 2,delay,port!=443)
 good.sort(key=rank)
 # Interleave distinct endpoints before expensive tests.
@@ -88,12 +88,13 @@ for item in good:
 groups={}
 for item in unique:
     origins=evidence.get(item[0].split('#')[0],set())
-    source=min(origins) if origins else -1
+    source=10 if 10 in origins else min(origins) if origins else -1
     groups.setdefault(source,[]).append(item)
 good=[]
 while any(groups.values()):
-    for group in groups.values():
-        if group: good.append(group.pop(0))
+    for source, group in groups.items():
+        for _ in range(5 if source==10 else 1):
+            if group: good.append(group.pop(0))
 good+=overflow
 def tunnel(item):
     import tempfile, subprocess, time, os
@@ -127,8 +128,8 @@ def tunnel(item):
             try:
                 time.sleep(.6)
                 results=[]
-                for attempt in range(7):
-                    if attempt: time.sleep(15)
+                for attempt in range(3):
+                    if attempt: time.sleep(5)
                     url=('https://www.gstatic.com/generate_204','https://www.cloudflare.com/cdn-cgi/trace')[attempt%2]
                     out=subprocess.check_output(['curl','--silent','--show-error','--fail','--max-time','8','--socks5-hostname',f'127.0.0.1:{local}','-o',os.devnull,'-w','%{http_code} %{time_starttransfer}',url],stderr=subprocess.DEVNULL,text=True).split()
                     if out[0] not in ('200','204'): return
@@ -149,15 +150,16 @@ def tunnel(item):
                 except subprocess.TimeoutExpired: proc.kill(); proc.wait()
     except Exception: return
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
-    tested=[x for x in ex.map(tunnel,good[:36]) if x]
+candidates=good[:300]
+with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
+    tested=[x for x in ex.map(tunnel,candidates) if x]
 import hashlib
 history_path=Path('stability.json')
 try: history=json.loads(history_path.read_text())
 except Exception: history={}
 def key(item): return hashlib.sha256(item[0].split('#')[0].encode()).hexdigest()
 passed={key(x[0]) for x in tested}
-for item in good[:48]:
+for item in candidates:
     k=key(item)
     old=history.get(k,[])
     history[k]=(old+[int(k in passed)])[-24:]
@@ -165,7 +167,7 @@ def stability(x):
     h=history[key(x[0])]
     return (-(sum(h)+1)/(len(h)+2),-sum(h),-x[3],x[2],x[1],rank(x[0]))
 tested.sort(key=stability)
-history_path.write_text(json.dumps({k:v for k,v in history.items() if k in {key(i) for i in good[:48]}}))
+history_path.write_text(json.dumps({k:v for k,v in history.items() if k in {key(i) for i in candidates}}))
 good=[]
 hosts=set()
 for x in tested:
@@ -173,11 +175,19 @@ for x in tested:
     if host in hosts: continue
     hosts.add(host); good.append(item)
 print("HTTPS tunnel passes outside Iran:",len(good))
-for name,rows in [('v2box',good),('tizy',[x for x in good if x[1][2] in ('vless','vmess','trojan','ss') and x[1][3].get('type',['tcp'])[0] in ('tcp','raw','ws','grpc')])]:
+passed_rows=good[:]
+# Include structurally valid TCP-reachable candidates after verified tunnels; these are not Iran-tested.
+for item in candidates:
+    if item[1][0].lower() not in hosts:
+        hosts.add(item[1][0].lower()); good.append(item)
+def tv_ok(x):
+    return x[1][2] in ('vless','trojan','ss','vmess') and x[1][3].get('type',['tcp'])[0] in ('tcp','raw','ws','grpc')
+tv=sorted(filter(tv_ok,good),key=lambda x:(key(x) not in passed, x[1][3].get('type',['tcp'])[0] not in ('tcp','raw'),rank(x)))
+for name,rows,limit in [('v2box',good,100),('tizy',tv,50)]:
     p=Path(name+'.txt')
     if rows:
-        p.write_text('\n'.join(x[0] for x in rows[:10])+'\n')
+        p.write_text('\n'.join(x[0] for x in rows[:limit])+'\n')
     else:
         p.write_text('')
         print('No passing candidates:',name)
-print('HTTPS tested outside Iran; no Iran test:',len(good))
+print('HTTPS tested outside Iran:',len(passed_rows),'TCP-only candidates:',len(good)-len(passed_rows),'No Iran test')
